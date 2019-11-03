@@ -10,15 +10,12 @@ from threading import Thread, Lock, Event
 import copy
 
 import cherrypy
+import socket
 
 mutex = Lock()
 
-i=0
-f,ax = plt.subplots(3)
-f.set_size_inches(15,8)
-
 RATE = 44100
-CHUNK = 2048   # Buffer size
+CHUNK = 4096   # Buffer size
 
 BANDS = 20
 FREQSTEP = 100
@@ -61,6 +58,9 @@ ready = False
 # GRAPH
 #
 
+f,ax = plt.subplots(3)
+f.set_size_inches(15,8)
+
 # Prepare the Plotting Environment with random starting values
 x = np.arange(10000)
 y = np.random.randn(10000)
@@ -75,12 +75,12 @@ ax[0].set_title("Raw Audio Signal")
 li2, = ax[1].plot(x, y)
 ax[1].set_xlim(0,(BANDS)*FREQSTEP)
 ax[1].set_ylim(50,100)
-ax[1].set_title("Fast Fourier Transform")
+ax[1].set_title("FFT spectrum (dB / Hz)")
 
 # Plot 2 is for the FFT of the audio
 li3 = ax[2].bar( FREQ_bands.keys(), [FREQ_band_fft[band] for band in FREQ_bands])
 ax[2].set_ylim(50,100)
-ax[2].set_title("FFT average bands")
+ax[2].set_title("FFT average bands (dB / Hz)")
 
 
 # Show the plot, but without blocking updates
@@ -97,7 +97,7 @@ def compute():
 
     # get and convert the data to float
     global audio_data
-    audio_data = np.fromstring(in_data, np.int16)
+    audio_data = np.frombuffer(in_data, np.int16)
 
     # remove DC offset
     audio_data = signal.detrend(audio_data)
@@ -106,12 +106,12 @@ def compute():
     global fft_vals
     fft_vals = np.absolute(np.fft.rfft(audio_data))
 
+    # Get frequencies for amplitudes in Hz
+    fft_freq = np.fft.rfftfreq(len(audio_data), 1.0/RATE)
+
     # Fast Fourier Transform, 10*log10(abs) is to scale it to dB
     global fft_dbs 
     fft_dbs = 10.*np.log10(fft_vals)
-
-    # Get frequencies for amplitudes in Hz
-    fft_freq = np.fft.rfftfreq(len(audio_data), 1.0/RATE)
 
     # Take the mean of the fft amplitude for each FREQ band
     global FREQ_band_fft 
@@ -150,16 +150,15 @@ def plot():
         # If uses plt.draw(), axes are re-drawn every time
         li.set_xdata(np.arange(len(ad)))
         li.set_ydata(ad)
-        li2.set_xdata(np.arange(len(fd))*10.)
+        li2.set_xdata(np.arange(len(fd)) * RATE/CHUNK)
         li2.set_ydata(fd)
         
         ax[2].clear()
         ax[2].bar( FREQ_bands.keys(), [Fb[band] for band in FREQ_bands])
         ax[2].set_ylim(50,100)
+        ax[2].set_title("Frequency bands (dB / Hz)")
 
         ready = False
-
-    
 
     # Show the updated plot, but without blocking
     plt.pause(0.01)
@@ -194,8 +193,24 @@ class HelloWorld(object):
         mutex.release()
         return Fb
 
+def get_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+        # print(s.getsockname())
+    except:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
 cherrypy.tree.mount(HelloWorld())
-cherrypy.config.update({'log.screen': False,
+cherrypy.config.update({
+                        'server.socket_host': '0.0.0.0',
+                        'server.port': 8080,
+                        'log.screen': False,
                         'log.access_file': '',
                         'log.error_file': ''})
 cherrypy.engine.start()
@@ -206,7 +221,7 @@ stream.start_stream()
 print ("\n+---------------------------------+")
 print ("| Press Ctrl+C to Break Recording |")
 print ("+---------------------------------+\n")
-print ("JSON API: 0.0.0.0:8080\n")
+print ("JSON API: http://"+get_ip()+":8080\n")
 
 # Loop so program doesn't end while the stream callback's
 # itself for new data
