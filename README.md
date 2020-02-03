@@ -7,6 +7,7 @@
 - install python 3.x
 - `pip3 install pyaudio numpy scipy matplotlib cherrypy`
 - download or clone this repository
+- `./install.sh`
 
 ### Run
 - `python3 micfft.py`

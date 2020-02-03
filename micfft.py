@@ -6,13 +6,14 @@ from scipy import signal
 # import matplotlib.pyplot as plt
 
 from collections import OrderedDict 
-from threading import Thread, Lock, Event
+import threading
 import copy
 import time
 import cherrypy
 import socket
+import ctypes
 
-mutex = Lock()
+mutex = threading.Lock()
 
 RATE = 44100
 CHUNK = 1024*4   # Buffer size
@@ -71,6 +72,9 @@ fft_dbs = [None]*NUM_STREAM*NUM_CHANNEL
 global ready
 ready = False
 
+global new_data
+new_data = True
+
 
 
 #
@@ -111,8 +115,11 @@ def compute():
 
     for i in range(NUM_STREAM):
 
-        # try:
-            in_data = streams[i].read(CHUNK, exception_on_overflow = False)
+        try:
+            in_data = streams[i].read(CHUNK)
+
+            global new_data
+            new_data = True
 
             # get and convert the data to float, split per channels
             data = np.frombuffer(in_data, np.int16)
@@ -154,8 +161,8 @@ def compute():
             # Unlock
             mutex.release()
 
-        # except Exception as e: 
-        #     print('flux', i, e)
+        except Exception as e: 
+            print('flux', i, e)
 
 
 
@@ -192,10 +199,10 @@ def compute():
 #     plt.pause(0.01)
 
 
-class ComputeThread(Thread):
+class ComputeThread(threading.Thread):
     def __init__(self):
-        Thread.__init__(self)
-        self.stopped = Event()
+        threading.Thread.__init__(self)
+        self.stopped = threading.Event()
         self.stopped.clear()
 
     def stop(self):
@@ -207,6 +214,7 @@ class ComputeThread(Thread):
         while not self.stopped.is_set():
             compute()
         print("exit")
+
 
 computer = ComputeThread()
 computer.start()
@@ -254,12 +262,10 @@ print ("JSON API: http://"+get_ip()+":8080\n")
 
 # Loop so program doesn't end while the stream callback's
 # itself for new data
-while True:
-    try:
-        # plot()
-        time.sleep(0.1)
-    except:
-        break
+while new_data:
+    new_data = False
+    time.sleep(2)
+print("no more data received..")
 
 print("stop")
 cherrypy.engine.stop()
